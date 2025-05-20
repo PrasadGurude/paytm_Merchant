@@ -1,0 +1,7 @@
+-- AlterTable
+ALTER TABLE "MerchantAccount" ADD COLUMN     "locked" INTEGER NOT NULL DEFAULT 0,
+ALTER COLUMN "balance" SET DEFAULT 0;
+
+-- AlterTable
+ALTER TABLE "UserAccount" ADD COLUMN     "locked" INTEGER NOT NULL DEFAULT 0,
+ALTER COLUMN "balance" SET DEFAULT 0;
