@@ -2,8 +2,11 @@ import { PrismaClient, User } from "@prisma/client";
 import { Router, Request, Response } from "express";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
+import { userMiddleware } from "../middleware";
 
 const router = Router();
+const prisma = new PrismaClient();
+
 
 router.post("/login", async (req: Request, res: Response): Promise<void> => {
     const { email, password } = req.body;
@@ -14,7 +17,6 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
             return;
         }
 
-        const prisma = new PrismaClient();
 
         // Find user with email
         const user = await prisma.user.findUnique({
@@ -27,7 +29,7 @@ router.post("/login", async (req: Request, res: Response): Promise<void> => {
         }
 
         // Verify password
-        const isPasswordValid = bcrypt.compare(password, user.password!);
+        const isPasswordValid = await bcrypt.compare(password, user.password!);
         if (!isPasswordValid) {
             res.status(401).json({ message: "Invalid email or password" });
             return;
@@ -65,7 +67,6 @@ router.post("/signup", async (req: Request, res: Response): Promise<any> => {
     const { email, password, name } = req.body;
 
     try {
-        const prisma = new PrismaClient();
 
         // Check if user exists
         const existingUser = await prisma.user.findUnique({
@@ -82,12 +83,12 @@ router.post("/signup", async (req: Request, res: Response): Promise<any> => {
         // Create new user
         prisma.$transaction(async (tx) => {
             const user = await tx.user.create({
-            data: {
-                email,
-                password: hashedPassword,
-                name,
-            }
-        });
+                data: {
+                    email,
+                    password: hashedPassword,
+                    name,
+                }
+            });
             await tx.userAccount.create({
                 data: {
                     userId: user.id,
@@ -102,7 +103,7 @@ router.post("/signup", async (req: Request, res: Response): Promise<any> => {
                 },
                 process.env.USER_JWT_SECRET as string
             );
-    
+
             return res.status(201).json({
                 message: "User created successfully",
                 token,
@@ -119,22 +120,122 @@ router.post("/signup", async (req: Request, res: Response): Promise<any> => {
     }
 });
 
-router.post("/onramp", (req, res) => {
+router.post("/onramp", async (req, res) => {
     const { userId, amount } = req.body;
-    const prisma = new PrismaClient();
-    const account = prisma.userAccount.update({
+
+    try {
+        const account = await prisma.userAccount.update({
+            where: { userId },
+            data: {
+                balance: {
+                    increment: amount
+                }
+            }
+        });
+
+        res.status(200).json({ message: "Balance updated", account });
+    } catch (error) {
+        console.error(error);
+        res.status(500).json({ message: "Internal server error" });
+    }
+});
+
+router.post("/transfer", userMiddleware, async (req, res): Promise<any> => {
+    const { merchantId, amount } = req.body;
+
+    const userId = req.user?.id!
+
+
+    const paymentDone = await prisma.$transaction(async tx => {
+
+        const checkIsLocked = await prisma.userAccount.findUnique({
+            where:{
+                userId,
+                locked:1
+            }
+        })
+
+
+        const lockUser = await prisma.userAccount.update({
         where: {
-            userId: userId
+            userId
         },
         data: {
-            balance: {
-                increment: amount
-            }
+            locked: 1
         }
     })
+        const userAccount = await tx.userAccount.findFirst({
+            where: {
+                userId
+            }
+        })
+        if ((userAccount?.balance || 0) < amount) {
+            return res.json({
+                message:"Balence is insufficient"
+            })
+        }
+        console.log("user balance check passed")
+        await new Promise((r): any => setTimeout(r, 10000))
+
+        if (checkIsLocked) {
+            return res.json({
+                message: "transaction failed due to concurrent issue"
+            })
+        }
+
+        const userAccountChanges = await tx.userAccount.update({
+            where: {
+                userId
+            },
+            data: {
+                balance: {
+                    decrement: amount
+                }
+            }
+        })
+        const merchantAccountChanges = await tx.merchantAccount.update({
+            where: {
+                merchantId
+            },
+            data: {
+                balance: {
+                    increment: amount
+                }
+            }
+        })
+        await tx.userAccount.update({
+            where:{
+                userId
+            },
+            data:{
+                locked:0
+            }
+        })
+        return { userAccountChanges, merchantAccountChanges }
+    }, {
+        maxWait: 50000,
+        timeout: 100000
+    })
+
+    if (paymentDone) {
+        return res.json({
+            message: "Payment done"
+        })
+    } else {
+        await prisma.userAccount.update({
+            where:{
+                userId
+            },
+            data:{
+                locked:0
+            }
+        })
+        return res.status(411).json({
+            message: `Payment failed ${paymentDone}`
+        })
+    }
+
 })
-
-
 
 
 export default router;

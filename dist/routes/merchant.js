@@ -76,27 +76,35 @@ router.post("/signup", (req, res) => __awaiter(void 0, void 0, void 0, function*
         // Hash password
         const hashedPassword = yield bcryptjs_1.default.hash(password, 10);
         // Create new user
-        const user = yield prisma.merchant.create({
-            data: {
-                email,
-                password: hashedPassword,
-                name,
-            }
-        });
-        const token = jsonwebtoken_1.default.sign({
-            id: user.id,
-            name: user.name,
-            email: user.email,
-        }, process.env.MERCHANT_JWT_SECRET);
-        return res.status(201).json({
-            message: "User created successfully",
-            token,
-            user: {
+        prisma.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
+            const user = yield tx.merchant.create({
+                data: {
+                    email,
+                    password: hashedPassword,
+                    name,
+                }
+            });
+            yield tx.merchantAccount.create({
+                data: {
+                    merchantId: user.id,
+                    balance: 0
+                }
+            });
+            const token = jsonwebtoken_1.default.sign({
                 id: user.id,
                 name: user.name,
                 email: user.email,
-            }
-        });
+            }, process.env.MERCHANT_JWT_SECRET);
+            return res.status(201).json({
+                message: "User created successfully",
+                token,
+                user: {
+                    id: user.id,
+                    name: user.name,
+                    email: user.email,
+                }
+            });
+        }));
     }
     catch (error) {
         console.error(error);
