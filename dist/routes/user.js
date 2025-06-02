@@ -134,20 +134,7 @@ router.post("/transfer", middleware_1.userMiddleware, (req, res) => __awaiter(vo
     const { merchantId, amount } = req.body;
     const userId = (_a = req.user) === null || _a === void 0 ? void 0 : _a.id;
     const paymentDone = yield prisma.$transaction((tx) => __awaiter(void 0, void 0, void 0, function* () {
-        const checkIsLocked = yield prisma.userAccount.findUnique({
-            where: {
-                userId,
-                locked: 1
-            }
-        });
-        const lockUser = yield prisma.userAccount.update({
-            where: {
-                userId
-            },
-            data: {
-                locked: 1
-            }
-        });
+        yield tx.$queryRaw `SELECT * FROM "UserAccount" WHERE "userId" = ${userId} FOR UPDATE`;
         const userAccount = yield tx.userAccount.findFirst({
             where: {
                 userId
@@ -160,11 +147,6 @@ router.post("/transfer", middleware_1.userMiddleware, (req, res) => __awaiter(vo
         }
         console.log("user balance check passed");
         yield new Promise((r) => setTimeout(r, 10000));
-        if (checkIsLocked) {
-            return res.json({
-                message: "transaction failed due to concurrent issue"
-            });
-        }
         const userAccountChanges = yield tx.userAccount.update({
             where: {
                 userId
@@ -185,14 +167,6 @@ router.post("/transfer", middleware_1.userMiddleware, (req, res) => __awaiter(vo
                 }
             }
         });
-        yield tx.userAccount.update({
-            where: {
-                userId
-            },
-            data: {
-                locked: 0
-            }
-        });
         return { userAccountChanges, merchantAccountChanges };
     }), {
         maxWait: 50000,
@@ -204,14 +178,6 @@ router.post("/transfer", middleware_1.userMiddleware, (req, res) => __awaiter(vo
         });
     }
     else {
-        yield prisma.userAccount.update({
-            where: {
-                userId
-            },
-            data: {
-                locked: 0
-            }
-        });
         return res.status(411).json({
             message: `Payment failed ${paymentDone}`
         });

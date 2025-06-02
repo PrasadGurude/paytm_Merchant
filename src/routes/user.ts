@@ -148,22 +148,8 @@ router.post("/transfer", userMiddleware, async (req, res): Promise<any> => {
 
     const paymentDone = await prisma.$transaction(async tx => {
 
-        const checkIsLocked = await prisma.userAccount.findUnique({
-            where:{
-                userId,
-                locked:1
-            }
-        })
+        await tx.$queryRaw`SELECT * FROM "UserAccount" WHERE "userId" = ${userId} FOR UPDATE`
 
-
-        const lockUser = await prisma.userAccount.update({
-        where: {
-            userId
-        },
-        data: {
-            locked: 1
-        }
-    })
         const userAccount = await tx.userAccount.findFirst({
             where: {
                 userId
@@ -171,17 +157,11 @@ router.post("/transfer", userMiddleware, async (req, res): Promise<any> => {
         })
         if ((userAccount?.balance || 0) < amount) {
             return res.json({
-                message:"Balence is insufficient"
+                message: "Balence is insufficient"
             })
         }
         console.log("user balance check passed")
         await new Promise((r): any => setTimeout(r, 10000))
-
-        if (checkIsLocked) {
-            return res.json({
-                message: "transaction failed due to concurrent issue"
-            })
-        }
 
         const userAccountChanges = await tx.userAccount.update({
             where: {
@@ -203,14 +183,7 @@ router.post("/transfer", userMiddleware, async (req, res): Promise<any> => {
                 }
             }
         })
-        await tx.userAccount.update({
-            where:{
-                userId
-            },
-            data:{
-                locked:0
-            }
-        })
+
         return { userAccountChanges, merchantAccountChanges }
     }, {
         maxWait: 50000,
@@ -222,14 +195,7 @@ router.post("/transfer", userMiddleware, async (req, res): Promise<any> => {
             message: "Payment done"
         })
     } else {
-        await prisma.userAccount.update({
-            where:{
-                userId
-            },
-            data:{
-                locked:0
-            }
-        })
+
         return res.status(411).json({
             message: `Payment failed ${paymentDone}`
         })
